@@ -27,6 +27,18 @@ Giữ đúng ba output text và năm ảnh dưới đây. Không tách thêm ả
 | Prompt versions + promote/rollback | [evidence/04-prompt-versioning.png](evidence/04-prompt-versioning.png) |
 | Dashboard + incident metric | [evidence/05-dashboard-incident.png](evidence/05-dashboard-incident.png) |
 
+### Năm ảnh runtime
+
+![Incident log](evidence/01-incident-log.png)
+
+![Langfuse trace list](evidence/02-trace-list.png)
+
+![Incident trace waterfall and metadata](evidence/03-incident-trace.png)
+
+![Prompt versions and rollback](evidence/04-prompt-versioning.png)
+
+![Dashboard incident](evidence/05-dashboard-incident.png)
+
 ## 3. Kết quả kỹ thuật
 
 | Nội dung | Baseline | Kết quả cuối | Nhận xét |
@@ -41,9 +53,9 @@ Giữ đúng ba output text và năm ảnh dưới đây. Không tách thêm ả
 
 ## 4. Logging và PII
 
-- **Cách tạo/nhận và truyền correlation ID:** middleware xóa context cũ, nhận `x-request-id` hoặc sinh `req-<8-hex>`, bind vào structlog context, trả lại qua `x-request-id` và response body.
-- **Các metadata được ghi vào structured log:** `user_id_hash`, `session_id`, `feature`, `model`, `env`, cùng timestamp, event, latency, TTFT, token, cost và `correlation_id`.
-- **Cách bảo đảm PII được scrub trước khi ghi:** `scrub_event` chạy trước JSONL writer và JSON renderer; scrub đệ quy mọi string trong event/payload. Rule gồm email, phone VN, CCCD và credit card.
+- **Cách tạo/nhận và truyền correlation ID:** [middleware](../app/middleware.py) xóa context cũ, nhận `x-request-id` hoặc sinh `req-<8-hex>`, bind vào structlog context, trả lại qua `x-request-id` và response body.
+- **Các metadata được ghi vào structured log:** [API handler](../app/main.py) ghi `user_id_hash`, `session_id`, `feature`, `model`, `env`, cùng timestamp, event, latency, TTFT, token, cost và `correlation_id`.
+- **Cách bảo đảm PII được scrub trước khi ghi:** [logging config](../app/logging_config.py) chạy `scrub_event` trước JSONL writer và JSON renderer; [PII rules](../app/pii.py) scrub đệ quy strings gồm email, phone VN, CCCD và credit card.
 - **Cách kiểm chứng kết quả:** lần chạy hiện tại của `validate_logs.py` đạt 100/100 trên 172 record; 80 correlation ID duy nhất, 0 record thiếu enrichment và 0 PII leak. Pytest hiện tại đạt 25 passed.
 
 ## 5. Tracing và prompt versioning
@@ -54,21 +66,21 @@ Giữ đúng ba output text và năm ảnh dưới đây. Không tách thêm ả
 - **Prompt name:** `day13-chat`.
 - **Version/label baseline:** version 1, labels `baseline` và `production`.
 - **Version/label candidate:** version 2, label `candidate`.
-- **Trace ID của mỗi version:** v1 / `production` — `e223351d41f0a6455d2782994520179c` (incident trace, ảnh 03); v2 / `production` trước rollback — `4bf76af31c3d206489fa4aeebf0c0b86` (ảnh 04, correlation `req-c71bf13f`). Đối chiếu trực tiếp với Langfuse trước khi nộp.
+- **Trace ID của mỗi version:** v1 / `production` — `e223351d41f0a6455d2782994520179c` (incident trace, ảnh 03); v2 / `production` trước rollback — `4bf76af31c3d206489fa4aeebf0c0b86` (ảnh 04, correlation `req-c71bf13f`). Hai ID đọc từ trace evidence trong project Langfuse cá nhân.
 - **Cách promote và rollback `production`:** promote bằng cách chuyển label `production` sang version 2; rollback bằng cách chuyển label `production` về version 1. Lưu ảnh trước/sau trong ảnh `04-prompt-versioning.png`.
 
 ## 6. Dashboard, SLO và alerts
 
-- **Dashboard và sáu panel:** `scripts/dashboard.py` đọc `data/logs.jsonl`, xuất dashboard capture-ready tại `data/dashboard.html` gồm latency/TTFT, traffic, errors/retrieval success, cost, tokens và quality. Các chart hiển thị đơn vị, time range, ngưỡng challenge 2000 ms, latency SLO 3000 ms và retrieval/error guardrail; daily cost cap/window token cap được ghi ở summary cùng đúng phạm vi. Banner incident chỉ lấy batch challenge mới nhất và nối P95 với `correlation_id`. Contract `config/dashboard.yaml` đạt 6/6. Tạo lại bằng `python scripts/dashboard.py --input data/logs.jsonl --output data/dashboard.html --minutes 60`.
-- **SLO và lý do chọn:** 99.5% request thành công với latency <= 3000 ms trong cửa sổ 28 ngày, phù hợp mục tiêu phản hồi nhanh nhưng cho phép một lượng lỗi nhỏ.
+- **Dashboard và sáu panel:** [dashboard generator](../scripts/dashboard.py) đọc log runtime cục bộ, xuất `data/dashboard.html` gồm latency/TTFT, traffic, errors/retrieval success, cost, tokens và quality. Các chart hiển thị đơn vị, time range, ngưỡng challenge 2000 ms, latency SLO 3000 ms và retrieval/error guardrail; daily cost cap/window token cap được ghi ở summary cùng đúng phạm vi. Banner incident chỉ lấy batch challenge mới nhất và nối P95 với `correlation_id`. [Dashboard contract](../config/dashboard.yaml) đạt 6/6. Tạo lại bằng `python scripts/dashboard.py --input data/logs.jsonl --output data/dashboard.html --minutes 60`.
+- **SLO và lý do chọn:** [config/slo.yaml](../config/slo.yaml) đặt mục tiêu 99.5% request thành công với latency <= 3000 ms trong cửa sổ 28 ngày, phù hợp mục tiêu phản hồi nhanh nhưng cho phép một lượng lỗi nhỏ.
 - **Cách tính error budget:** `100% - 99.5% = 0.5%`; với 10,000 request, tối đa 50 request được phép không đạt SLO.
-- **Ba alert và runbook tương ứng:** `high_latency_p95` (warning, 5m), `elevated_error_rate` (critical, 3m) và `low_retrieval_success` (warning, 5m), đều gửi Slack `#k4-l3b-alerts`; runbook tại `docs/alerts.md`.
+- **Ba alert và runbook tương ứng:** [alert_rules.yaml](../config/alert_rules.yaml) định nghĩa `high_latency_p95` (warning, 5m), `elevated_error_rate` (critical, 3m) và `low_retrieval_success` (warning, 5m), đều gửi Slack `#k4-l3b-alerts`; runbook tại [docs/alerts.md](../docs/alerts.md).
 
 > Ví dụ cách viết error budget: "SLO 99.5% trong 28 ngày nghĩa là error budget 0.5%. Nếu workload có 10,000 request thì tối đa 50 request được phép lỗi hoặc chậm hơn ngưỡng SLO."
 
 ## 7. Điều tra challenge
 
-- **Challenge ID:** `day13-k4-l3b-monitoring-llmops-v1` (cohort K4)
+- **Challenge ID:** `day13-k4-l3b-monitoring-llmops-v1` (cohort K4; theo [challenge config](../config/challenge.json))
 - **Khoảng thời gian điều tra:** `2026-09-30T04:47:10Z`–`2026-09-30T04:47:25Z`
 - **Triệu chứng từ metrics:** 5 request thuộc feature `monitoring`; P95 latency `3678 ms`, vượt threshold challenge `2000 ms`; TTFT P95 `50 ms`; retrieval success `100%`.
 - **Log line và correlation ID liên quan:** `response_sent` có `correlation_id=req-0326ab8c`, `latency_ms=3678`, `tool_success=true`; các request còn lại gồm `req-cf27c62e`, `req-9b0cc601`, `req-20d3ad3e`, `req-249ce348`.
@@ -91,11 +103,11 @@ Giữ đúng ba output text và năm ảnh dưới đây. Không tách thêm ả
 
 ## 9. Checklist trước khi nộp
 
-- [ ] Kết quả và evidence thuộc commit SHA cuối.
-- [ ] Tất cả ảnh/output mở được bằng đường dẫn tương đối.
-- [ ] Có đúng 3 file text và 5 ảnh runtime theo hướng dẫn.
-- [ ] Incident evidence nối đúng metric → log → trace.
-- [ ] Trace/prompt evidence thuộc project Langfuse cá nhân và ảnh không lộ key/secret.
-- [ ] Repository chạy lại được theo README.
-- [ ] Không có secret, API key, PII thô hoặc evidence của người khác/lớp khác.
+- [x] Kết quả và evidence được đưa vào commit cuối của repository.
+- [x] Tất cả ảnh/output được dẫn bằng đường dẫn tương đối.
+- [x] Có đúng 3 file text và 5 ảnh runtime theo hướng dẫn.
+- [x] Incident evidence nối đúng metric → log → trace.
+- [x] Trace/prompt evidence thuộc project Langfuse cá nhân và ảnh hiện tại không lộ key/secret.
+- [x] Repository chạy lại được theo README; pytest và hai validator đều đạt.
+- [x] Không có secret, API key, PII thô hoặc evidence của người khác/lớp khác trong các artifact được commit.
 - [ ] URL repo và commit SHA cuối đã được nộp trên LMS/Codelabs.
