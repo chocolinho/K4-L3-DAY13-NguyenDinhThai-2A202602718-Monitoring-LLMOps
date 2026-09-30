@@ -36,6 +36,18 @@ def get_langfuse_client():
     return get_client()
 
 
+@contextmanager
+def start_observation(client: Any, **kwargs: Any):
+    """Start a Langfuse v4 child observation when the SDK is available."""
+    starter = getattr(client, "start_as_current_observation", None)
+    if callable(starter):
+        with starter(**kwargs) as observation:
+            yield observation
+    else:
+        # Local tests and fallback mode can run without Langfuse credentials.
+        yield None
+
+
 def tracing_enabled() -> bool:
     return LANGFUSE_SDK_AVAILABLE and bool(
         os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")
